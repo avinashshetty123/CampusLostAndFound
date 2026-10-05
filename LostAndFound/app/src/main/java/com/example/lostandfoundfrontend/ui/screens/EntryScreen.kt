@@ -9,7 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -19,10 +20,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.lostandfoundfrontend.R
+import com.example.lostandfoundfrontend.data.StatsUiState
+import com.example.lostandfoundfrontend.ui.components.animatedCount
+import com.example.lostandfoundfrontend.ui.components.pressScale
+import com.example.lostandfoundfrontend.ui.components.staggeredEntrance
 import com.example.lostandfoundfrontend.ui.theme.*
 
 @Composable
-fun EntryScreen(onGetStarted: () -> Unit) {
+fun EntryScreen(stats: StatsUiState, onGetStarted: () -> Unit) {
     val pulse = rememberInfiniteTransition(label = "pulse")
     val logoScale by pulse.animateFloat(
         initialValue = 1f, targetValue = 1.05f,
@@ -63,9 +68,12 @@ fun EntryScreen(onGetStarted: () -> Unit) {
         ) {
             Spacer(modifier = Modifier.height(64.dp))
 
-            // Logo
+            // Logo — springs in, then keeps a gentle pulse
+            val logoIn = remember { Animatable(0f) }
+            LaunchedEffect(Unit) { logoIn.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
             Box(
-                modifier = Modifier.size(130.dp).scale(logoScale)
+                modifier = Modifier.size(130.dp)
+                    .graphicsLayer { scaleX = logoIn.value * logoScale; scaleY = logoIn.value * logoScale }
                     .background(PaperWhite.copy(alpha = 0.12f), CircleShape),
                 contentAlignment = Alignment.Center
             ) {
@@ -84,7 +92,7 @@ fun EntryScreen(onGetStarted: () -> Unit) {
             }
 
             // Tagline on dark bg
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.staggeredEntrance(2, baseDelayMs = 120)) {
                 Text(
                     "CAMPUS", fontSize = 11.sp, fontWeight = FontWeight.Bold,
                     color = PaperWhite.copy(alpha = 0.5f), letterSpacing = 5.sp
@@ -98,7 +106,7 @@ fun EntryScreen(onGetStarted: () -> Unit) {
 
             // Stats row — sits on the boundary
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).staggeredEntrance(3, baseDelayMs = 120),
                 shape = RoundedCornerShape(16.dp),
                 color = PaperWhite,
                 shadowElevation = 8.dp,
@@ -108,34 +116,43 @@ fun EntryScreen(onGetStarted: () -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    EntryStatItem("120+", "Items Found")
+                    // Live numbers from the server, counting up as they arrive
+                    EntryStatItem(animatedCount(stats.total), "Reported")
                     Box(modifier = Modifier.width(1.dp).height(36.dp).background(StrokeGray))
-                    EntryStatItem("500+", "Students")
+                    EntryStatItem(animatedCount(stats.found), "Found")
                     Box(modifier = Modifier.width(1.dp).height(36.dp).background(StrokeGray))
-                    EntryStatItem("Fast", "Response")
+                    EntryStatItem(animatedCount(stats.resolved), "Reunited")
                 }
             }
 
             // CTA
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(bottom = 44.dp)
+                modifier = Modifier.padding(bottom = 44.dp).staggeredEntrance(4, baseDelayMs = 120)
             ) {
                 Text(
                     "Reuniting students with their belongings",
                     fontSize = 13.sp, color = TextSecond, textAlign = TextAlign.Center
                 )
                 Spacer(modifier = Modifier.height(18.dp))
+                val ctaInteraction = remember { MutableInteractionSource() }
+                // Arrow nudges right on a loop to invite the tap
+                val nudge by pulse.animateFloat(
+                    initialValue = 0f, targetValue = 6f,
+                    animationSpec = infiniteRepeatable(tween(700, easing = EaseInOutSine), RepeatMode.Reverse),
+                    label = "arrowNudge"
+                )
                 Button(
                     onClick = onGetStarted,
-                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    interactionSource = ctaInteraction,
+                    modifier = Modifier.fillMaxWidth().height(54.dp).pressScale(ctaInteraction),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Charcoal, contentColor = PaperWhite),
                     elevation = ButtonDefaults.buttonElevation(0.dp)
                 ) {
                     Text("Get Started", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("→", fontSize = 18.sp, fontWeight = FontWeight.Light)
+                    Text("→", fontSize = 18.sp, fontWeight = FontWeight.Light, modifier = Modifier.graphicsLayer { translationX = nudge })
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text("Free for all campus students", fontSize = 12.sp, color = TextHint)

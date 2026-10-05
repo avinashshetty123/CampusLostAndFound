@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import com.example.demo.dto.Dto.*;
 import com.example.demo.model.User;
 import com.example.demo.service.AuthService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -16,12 +17,12 @@ public class AuthController {
     private final AuthService authService;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@RequestBody RegisterRequest req) {
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest req) {
         return ResponseEntity.ok(authService.register(req));
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody LoginRequest req) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest req) {
         return ResponseEntity.ok(authService.login(req));
     }
 
@@ -40,7 +41,7 @@ public class AuthController {
     @PostMapping("/change-password")
     public ResponseEntity<MessageResponse> changePassword(
             @AuthenticationPrincipal User user,
-            @RequestBody ChangePasswordRequest req) {
+            @Valid @RequestBody ChangePasswordRequest req) {
         return ResponseEntity.ok(authService.changePassword(req, user));
     }
 }

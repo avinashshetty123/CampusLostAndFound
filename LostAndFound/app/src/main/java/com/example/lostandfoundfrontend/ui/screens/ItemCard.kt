@@ -1,5 +1,7 @@
 package com.example.lostandfoundfrontend.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -19,12 +21,21 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.lostandfoundfrontend.model.Item
 import com.example.lostandfoundfrontend.model.ItemStatus
 import com.example.lostandfoundfrontend.ui.theme.*
+
+private val idCardRegex = Regex("\\b(id|identity)\\b")
+
+internal fun categoryEmoji(item: Item): String = categoryEmoji("${item.title} ${item.category}")
 
 internal fun categoryEmoji(title: String): String {
     val t = title.lowercase()
@@ -35,7 +46,7 @@ internal fun categoryEmoji(title: String): String {
         t.contains("bag") || t.contains("backpack") -> "🎒"
         t.contains("wallet") || t.contains("purse") -> "👛"
         t.contains("book") || t.contains("notebook") -> "📚"
-        t.contains("card") || t.contains("id") -> "🪪"
+        t.contains("card") || idCardRegex.containsMatchIn(t) -> "🪪"
         t.contains("glasses") || t.contains("spectacles") -> "👓"
         t.contains("watch") -> "⌚"
         t.contains("earphone") || t.contains("airpod") || t.contains("headphone") -> "🎧"
@@ -80,14 +91,23 @@ fun ItemCard(item: Item, onClick: () -> Unit, modifier: Modifier = Modifier) {
             )
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Emoji icon box
+                    // Photo thumbnail, or a category emoji when there is none
                     Box(
                         modifier = Modifier.size(54.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(SurfaceGray),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(categoryEmoji(item.title), fontSize = 28.sp)
+                        if (item.imageUrl != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(LocalContext.current).data(item.imageUrl).crossfade(true).build(),
+                                contentDescription = item.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Text(categoryEmoji(item), fontSize = 28.sp)
+                        }
                     }
                     Spacer(modifier = Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -98,27 +118,17 @@ fun ItemCard(item: Item, onClick: () -> Unit, modifier: Modifier = Modifier) {
                         ) {
                             Text(
                                 item.title, fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                                color = TextPrimary, modifier = Modifier.weight(1f)
+                                color = TextPrimary, modifier = Modifier.weight(1f),
+                                maxLines = 1, overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            // Status pill
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .background(if (isLost) LostRedBg else FoundGreenBg)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    item.status.name, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                                    color = if (isLost) LostRed else FoundGreen
-                                )
-                            }
+                            StatusBadge(item.status, item.isResolved)
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.LocationOn, contentDescription = null, tint = TextSecond, modifier = Modifier.size(13.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text(item.location, fontSize = 12.sp, color = TextSecond)
+                            Text(item.location.ifBlank { "Location not given" }, fontSize = 12.sp, color = TextSecond, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Spacer(modifier = Modifier.height(2.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -131,7 +141,7 @@ fun ItemCard(item: Item, onClick: () -> Unit, modifier: Modifier = Modifier) {
 
                 if (item.description.isNotBlank()) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text(item.description, fontSize = 12.sp, color = TextSecond, maxLines = 2, lineHeight = 18.sp)
+                    Text(item.description, fontSize = 12.sp, color = TextSecond, maxLines = 2, lineHeight = 18.sp, overflow = TextOverflow.Ellipsis)
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -165,14 +175,22 @@ fun ItemCard(item: Item, onClick: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
+/** LOST / FOUND pill that cross-fades to RESOLVED when the item is closed. */
 @Composable
-fun StatusBadge(status: ItemStatus) {
+fun StatusBadge(status: ItemStatus, isResolved: Boolean = false) {
     val isLost = status == ItemStatus.LOST
+    val bg by animateColorAsState(
+        when { isResolved -> SurfaceGray; isLost -> LostRedBg; else -> FoundGreenBg }, label = "badgeBg"
+    )
+    val fg by animateColorAsState(
+        when { isResolved -> TextSecond; isLost -> LostRed; else -> FoundGreen }, label = "badgeFg"
+    )
     Box(
         modifier = Modifier.clip(RoundedCornerShape(20.dp))
-            .background(if (isLost) LostRedBg else FoundGreenBg)
+            .background(bg)
+            .animateContentSize()
             .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
-        Text(status.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = if (isLost) LostRed else FoundGreen)
+        Text(if (isResolved) "RESOLVED" else status.name, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = fg)
     }
 }

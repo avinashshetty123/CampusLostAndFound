@@ -1,64 +1,81 @@
 package com.example.demo.service;
 
+import com.example.demo.controller.ApiException;
 import com.example.demo.dto.Dto.*;
 import com.example.demo.model.Item;
 import com.example.demo.model.User;
 import com.example.demo.repository.ItemRepository;
 import com.example.demo.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Locale;
+import java.util.regex.Pattern;
+
+import static com.example.demo.service.AuthService.trimToNull;
 
 @Service
 @RequiredArgsConstructor
 public class ItemService {
 
+    private static final int MAX_PAGE_SIZE = 100;
+
     private final ItemRepository itemRepository;
     private final UserRepository userRepository;
     private final CloudinaryService cloudinaryService;
+    private final MongoTemplate mongoTemplate;
 
     public ItemsResponse getItems(String status, String search, int page, int perPage, User currentUser) {
-        PageRequest pageable = PageRequest.of(page - 1, perPage, Sort.by(Sort.Direction.DESC, "createdAt"));
-        boolean hasStatus = status != null && !status.isBlank();
-        boolean hasSearch = search != null && !search.isBlank();
+        int safePage = Math.max(page, 1);
+        int safePerPage = Math.min(Math.max(perPage, 1), MAX_PAGE_SIZE);
 
-        Page<Item> result;
-        if (hasStatus && hasSearch) {
-            result = itemRepository.findByStatusAndTitleContainingIgnoreCase(status, search, pageable);
-        } else if (hasStatus) {
-            result = itemRepository.findByStatus(status, pageable);
-        } else if (hasSearch) {
-            result = itemRepository.findByTitleContainingIgnoreCase(search, pageable);
-        } else {
-            result = itemRepository.findAll(pageable);
+        List<Criteria> filters = new ArrayList<>();
+        if (status != null && !status.isBlank()) {
+            filters.add(Criteria.where("status").is(status.trim().toUpperCase(Locale.ROOT)));
         }
+        if (search != null && !search.isBlank()) {
+            // Quote the input so user text is matched literally, never as a regex
+            Pattern p = Pattern.compile(Pattern.quote(search.trim()), Pattern.CASE_INSENSITIVE);
+            filters.add(new Criteria().orOperator(
+                    Criteria.where("title").regex(p),
+                    Criteria.where("description").regex(p),
+                    Criteria.where("location").regex(p),
+                    Criteria.where("category").regex(p)
+            ));
+        }
+        Query query = new Query();
+        if (!filters.isEmpty()) query.addCriteria(new Criteria().andOperator(filters.toArray(new Criteria[0])));
 
-        List<ItemDto> items = result.getContent().stream()
+        long total = mongoTemplate.count(query, Item.class);
+        query.with(PageRequest.of(safePage - 1, safePerPage, Sort.by(Sort.Direction.DESC, "createdAt")));
+        List<ItemDto> items = mongoTemplate.find(query, Item.class).stream()
                 .map(i -> toDto(i, currentUser))
-                .collect(Collectors.toList());
-        return new ItemsResponse(items, result.getTotalElements(), page, perPage);
+                .toList();
+        return new ItemsResponse(items, total, safePage, safePerPage);
     }
 
     public SingleItemResponse getById(String id, User currentUser) {
-        Item item = findOrThrow(id);
-        return new SingleItemResponse(toDto(item, currentUser), null);
+        return new SingleItemResponse(toDto(findOrThrow(id), currentUser), null);
     }
 
     public SingleItemResponse createItem(CreateItemRequest req, User reporter) {
         Item item = new Item();
-        item.setTitle(req.getTitle());
-        item.setDescription(req.getDescription());
-        item.setLocation(req.getLocation());
+        item.setTitle(req.getTitle().trim());
+        item.setDescription(trimToNull(req.getDescription()));
+        item.setLocation(trimToNull(req.getLocation()));
         item.setStatus(req.getStatus());
-        item.setCategory(req.getCategory());
-        item.setContactInfo(req.getContactInfo());
+        item.setCategory(trimToNull(req.getCategory()));
+        item.setContactInfo(trimToNull(req.getContactInfo()));
 
         // Snapshot reporter info so item detail always shows correct data
         item.setReportedBy(reporter.getId());
@@ -69,55 +86,61 @@ public class ItemService {
         item.setReporterClass(reporter.getStudentClass());
 
         itemRepository.save(item);
-
-        reporter.setReportsCount(reporter.getReportsCount() + 1);
-        userRepository.save(reporter);
-
         return new SingleItemResponse(toDto(item, reporter), "Item reported successfully");
     }
 
-    public SingleItemResponse uploadImage(String itemId, MultipartFile file, User user) throws IOException {
+    public SingleItemResponse uploadImage(String itemId, MultipartFile file, User user) {
         Item item = findOrThrow(itemId);
-        if (!item.getReportedBy().equals(user.getId())) {
-            throw new RuntimeException("Unauthorized");
-        }
+        requireOwner(item, user);
         item.setImageUrl(cloudinaryService.uploadImage(file));
         itemRepository.save(item);
         return new SingleItemResponse(toDto(item, user), "Image uploaded");
     }
 
+    /**
+     * Resolves an item. The reporter can mark their own item resolved; anyone else
+     * "claims" it (I found it / it's mine) and their message is stored for the reporter.
+     */
     public MessageResponse claimItem(String itemId, ClaimItemRequest req, User user) {
         Item item = findOrThrow(itemId);
+        if (item.isResolved()) {
+            throw ApiException.conflict("This item has already been resolved");
+        }
+        boolean isOwner = user.getId().equals(item.getReportedBy());
         item.setResolved(true);
+        item.setResolvedAt(Instant.now());
+        if (!isOwner) {
+            item.setClaimedBy(user.getId());
+            item.setClaimedByName(user.getName());
+            item.setClaimMessage(req == null ? null : trimToNull(req.getMessage()));
+        }
         itemRepository.save(item);
-
-        userRepository.findById(item.getReportedBy()).ifPresent(reporter -> {
-            reporter.setResolvedCount(reporter.getResolvedCount() + 1);
-            userRepository.save(reporter);
-        });
-        return new MessageResponse("Item marked as resolved", true);
+        return new MessageResponse(isOwner ? "Marked as resolved" : "Claim sent — the reporter can now see your message", true);
     }
 
     public MessageResponse deleteItem(String itemId, User user) {
         Item item = findOrThrow(itemId);
-        if (!item.getReportedBy().equals(user.getId())) {
-            throw new RuntimeException("Unauthorized");
-        }
+        requireOwner(item, user);
         itemRepository.delete(item);
-        user.setReportsCount(Math.max(0, user.getReportsCount() - 1));
-        userRepository.save(user);
+        // Drop the deleted item from everyone's bookmarks
+        mongoTemplate.updateMulti(
+                Query.query(Criteria.where("savedItemIds").is(itemId)),
+                new Update().pull("savedItemIds", itemId),
+                User.class);
         return new MessageResponse("Item deleted", true);
     }
 
     public ItemsResponse getMyItems(User user) {
         List<ItemDto> items = itemRepository.findByReportedByOrderByCreatedAtDesc(user.getId())
-                .stream().map(i -> toDto(i, user)).collect(Collectors.toList());
+                .stream().map(i -> toDto(i, user)).toList();
         return new ItemsResponse(items, items.size(), 1, items.size());
     }
 
     public ItemsResponse getSavedItems(User user) {
-        List<ItemDto> items = itemRepository.findAllById(user.getSavedItemIds())
-                .stream().map(i -> toDto(i, user)).collect(Collectors.toList());
+        List<ItemDto> items = itemRepository.findAllById(user.getSavedItemIds()).stream()
+                .sorted((a, b) -> compareCreatedDesc(a, b))
+                .map(i -> toDto(i, user))
+                .toList();
         return new ItemsResponse(items, items.size(), 1, items.size());
     }
 
@@ -131,8 +154,9 @@ public class ItemService {
     }
 
     public MessageResponse unsaveItem(String itemId, User user) {
-        user.getSavedItemIds().remove(itemId);
-        userRepository.save(user);
+        if (user.getSavedItemIds().remove(itemId)) {
+            userRepository.save(user);
+        }
         return new MessageResponse("Item removed from saved", true);
     }
 
@@ -140,7 +164,7 @@ public class ItemService {
         long total = itemRepository.count();
         long lost = itemRepository.countByStatus("LOST");
         long found = itemRepository.countByStatus("FOUND");
-        long resolved = itemRepository.countByIsResolved(true);
+        long resolved = itemRepository.countByResolved(true);
         return new StatsResponse(total, lost, found, resolved);
     }
 
@@ -164,6 +188,13 @@ public class ItemService {
         dto.setReporterClass(item.getReporterClass());
         dto.setCreatedAt(item.getCreatedAt() != null ? item.getCreatedAt().toString() : null);
         dto.setResolved(item.isResolved());
+        dto.setResolvedAt(item.getResolvedAt() != null ? item.getResolvedAt().toString() : null);
+        dto.setClaimedByName(item.getClaimedByName());
+        // Only the reporter and the claimer get to read the private claim message
+        if (currentUser != null && (currentUser.getId().equals(item.getReportedBy())
+                || currentUser.getId().equals(item.getClaimedBy()))) {
+            dto.setClaimMessage(item.getClaimMessage());
+        }
         if (currentUser != null) {
             dto.setSaved(currentUser.getSavedItemIds().contains(item.getId()));
         }
@@ -172,6 +203,17 @@ public class ItemService {
 
     private Item findOrThrow(String id) {
         return itemRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Item not found"));
+                .orElseThrow(() -> ApiException.notFound("Item not found"));
+    }
+
+    private static void requireOwner(Item item, User user) {
+        if (!user.getId().equals(item.getReportedBy())) {
+            throw ApiException.forbidden("Only the person who reported this item can do that");
+        }
+    }
+
+    private static int compareCreatedDesc(Item a, Item b) {
+        if (a.getCreatedAt() == null || b.getCreatedAt() == null) return 0;
+        return b.getCreatedAt().compareTo(a.getCreatedAt());
     }
 }

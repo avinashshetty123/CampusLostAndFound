@@ -1,6 +1,8 @@
 package com.example.lostandfoundfrontend.ui.screens
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -12,13 +14,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -26,7 +31,35 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.lostandfoundfrontend.R
+import com.example.lostandfoundfrontend.data.LostFoundViewModel
+import com.example.lostandfoundfrontend.ui.components.bounceClick
 import com.example.lostandfoundfrontend.ui.theme.*
+import kotlinx.coroutines.launch
+
+/** Snackbar host that shows the ViewModel's one-shot messages. */
+@Composable
+fun rememberToastHost(viewModel: LostFoundViewModel): SnackbarHostState {
+    val host = remember { SnackbarHostState() }
+    LaunchedEffect(Unit) {
+        viewModel.toasts.collect { message ->
+            host.currentSnackbarData?.dismiss()
+            launch { host.showSnackbar(message) }
+        }
+    }
+    return host
+}
+
+@Composable
+fun AppSnackbarHost(host: SnackbarHostState) {
+    SnackbarHost(host) { data ->
+        Snackbar(
+            snackbarData = data,
+            containerColor = Charcoal,
+            contentColor = PaperWhite,
+            shape = RoundedCornerShape(12.dp)
+        )
+    }
+}
 
 @Composable
 fun TopHeaderBar(title: String = "Campus Lost & Found", subtitle: String? = null) {
@@ -56,17 +89,6 @@ fun TopHeaderBar(title: String = "Campus Lost & Found", subtitle: String? = null
                 if (subtitle != null) {
                     Text(subtitle, fontSize = 11.sp, color = PaperWhite.copy(alpha = 0.6f))
                 }
-            }
-            // Notification bell
-            Box(
-                modifier = Modifier.size(36.dp)
-                    .background(PaperWhite.copy(alpha = 0.1f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.Notifications, contentDescription = "Notifications",
-                    tint = PaperWhite, modifier = Modifier.size(20.dp)
-                )
             }
         }
     }
@@ -110,18 +132,27 @@ fun BottomNavigationBar(
                 modifier = Modifier.align(Alignment.TopCenter).offset(y = (-18).dp),
                 contentAlignment = Alignment.Center
             ) {
+                // Pops in when the bar first appears, then springs on press
+                val appear = remember { Animatable(0f) }
+                LaunchedEffect(Unit) { appear.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow)) }
+                val isReport = selectedScreen == "Report"
+                val rotation by animateFloatAsState(if (isReport) 45f else 0f, spring(dampingRatio = 0.6f), label = "fabRotation")
                 Box(
                     modifier = Modifier
+                        .graphicsLayer { scaleX = appear.value; scaleY = appear.value }
                         .size(56.dp)
                         .shadow(8.dp, CircleShape)
                         .background(
                             Brush.linearGradient(listOf(Charcoal, Slate)),
                             CircleShape
                         )
-                        .clickable { onReportClick() },
+                        .bounceClick { onReportClick() },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Report", tint = PaperWhite, modifier = Modifier.size(26.dp))
+                    Icon(
+                        Icons.Default.Add, contentDescription = "Report", tint = PaperWhite,
+                        modifier = Modifier.size(26.dp).graphicsLayer { rotationZ = rotation }
+                    )
                 }
             }
         }

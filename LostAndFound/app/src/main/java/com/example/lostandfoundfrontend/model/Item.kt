@@ -12,7 +12,9 @@ data class Item(
     val description: String = "",
     val location: String = "",
     val status: ItemStatus = ItemStatus.LOST,
+    val category: String = "",
     val contactInfo: String = "",
+    val reporterId: String = "",
     val reporterName: String = "Anonymous",
     val reporterEmail: String = "",
     val reporterPhone: String = "",
@@ -20,5 +22,7 @@ data class Item(
     val reportedAt: String = "",
     val imageUrl: String? = null,
     val isResolved: Boolean = false,
-    val isSaved: Boolean = false
+    val isSaved: Boolean = false,
+    val claimedByName: String? = null,
+    val claimMessage: String? = null
 )

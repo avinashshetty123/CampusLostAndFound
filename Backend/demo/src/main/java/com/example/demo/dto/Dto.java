@@ -1,6 +1,10 @@
 package com.example.demo.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -13,18 +17,27 @@ public class Dto {
 
     @Data @AllArgsConstructor @NoArgsConstructor
     public static class LoginRequest {
-        private String email;
-        private String password;
+        @NotBlank(message = "Email is required") private String email;
+        @NotBlank(message = "Password is required") private String password;
+
+        // Trim before validation: phone keyboards often add a trailing space
+        public void setEmail(String email) { this.email = email == null ? null : email.trim(); }
     }
 
     @Data @AllArgsConstructor @NoArgsConstructor
     public static class RegisterRequest {
+        @NotBlank(message = "Name is required") @Size(max = 80, message = "Name is too long")
         private String name;
+        @NotBlank(message = "Email is required") @Email(message = "Enter a valid email address")
         private String email;
         private String mobile;
         @JsonProperty("student_class") private String studentClass;
         private String department;
+        @NotBlank(message = "Password is required") @Size(min = 6, max = 100, message = "Password must be at least 6 characters")
         private String password;
+
+        // Trim before validation: phone keyboards often add a trailing space
+        public void setEmail(String email) { this.email = email == null ? null : email.trim(); }
     }
 
     @Data @AllArgsConstructor @NoArgsConstructor
@@ -41,7 +54,9 @@ public class Dto {
 
     @Data @AllArgsConstructor @NoArgsConstructor
     public static class ChangePasswordRequest {
+        @NotBlank(message = "Current password is required")
         @JsonProperty("current_password") private String currentPassword;
+        @NotBlank(message = "New password is required") @Size(min = 6, max = 100, message = "New password must be at least 6 characters")
         @JsonProperty("new_password") private String newPassword;
     }
 
@@ -91,13 +106,20 @@ public class Dto {
         @JsonProperty("created_at") private String createdAt;
         @JsonProperty("is_resolved") private boolean resolved;
         @JsonProperty("is_saved") private boolean saved;
+        @JsonProperty("resolved_at") private String resolvedAt;
+        @JsonProperty("claimed_by_name") private String claimedByName;
+        @JsonProperty("claim_message") private String claimMessage;
     }
 
     @Data @AllArgsConstructor @NoArgsConstructor
     public static class CreateItemRequest {
+        @NotBlank(message = "Item name is required") @Size(max = 100, message = "Item name is too long")
         private String title;
+        @Size(max = 1000, message = "Description is too long")
         private String description;
+        @Size(max = 150, message = "Location is too long")
         private String location;
+        @NotBlank(message = "Status is required") @Pattern(regexp = "LOST|FOUND", message = "Status must be LOST or FOUND")
         private String status;
         private String category;
         @JsonProperty("contact_info") private String contactInfo;
@@ -120,6 +142,7 @@ public class Dto {
     @Data @AllArgsConstructor @NoArgsConstructor
     public static class ClaimItemRequest {
         @JsonProperty("item_id") private String itemId;
+        @Size(max = 500, message = "Message is too long")
         private String message;
     }
 

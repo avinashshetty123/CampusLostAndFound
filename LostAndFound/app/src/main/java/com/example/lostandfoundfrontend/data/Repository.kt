@@ -2,10 +2,15 @@ package com.example.lostandfoundfrontend.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
+import java.net.ConnectException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 // ─── Result wrapper ───────────────────────────────────────────────────────────
 
@@ -140,6 +145,8 @@ class LostFoundRepository {
 
     // ── Safe call helper ──────────────────────────────────────────────────────
 
+    private val gson = Gson()
+
     private suspend fun <T> safeCall(call: suspend () -> retrofit2.Response<T>): Result<T> {
         return try {
             val response = call()
@@ -148,10 +155,36 @@ class LostFoundRepository {
                 if (body != null) Result.Success(body)
                 else Result.Error("Empty response", response.code())
             } else {
-                Result.Error(response.message().ifBlank { "Request failed" }, response.code())
+                Result.Error(errorMessage(response), response.code())
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            Result.Error("The server is taking too long to respond. It may be waking up — please try again.")
+        } catch (e: UnknownHostException) {
+            Result.Error("Can't reach the server. Check your internet connection.")
+        } catch (e: ConnectException) {
+            Result.Error("Can't reach the server. Check your internet connection.")
         } catch (e: Exception) {
             Result.Error(e.localizedMessage ?: "Network error")
+        }
+    }
+
+    /** Prefer the backend's JSON `message`, fall back to a friendly text per status code. */
+    private fun errorMessage(response: retrofit2.Response<*>): String {
+        val serverMessage = try {
+            response.errorBody()?.string()?.let { gson.fromJson(it, MessageResponse::class.java)?.message }
+        } catch (e: Exception) {
+            null
+        }
+        if (!serverMessage.isNullOrBlank()) return serverMessage
+        return when (response.code()) {
+            401 -> "Session expired. Please log in again."
+            403 -> "You are not allowed to do that"
+            404 -> "Not found"
+            413 -> "Image must be smaller than 10MB"
+            in 500..599 -> "Server error. Please try again shortly."
+            else -> "Request failed (${response.code()})"
         }
     }
 }

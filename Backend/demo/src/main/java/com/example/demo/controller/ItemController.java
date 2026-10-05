@@ -3,13 +3,13 @@ package com.example.demo.controller;
 import com.example.demo.dto.Dto.*;
 import com.example.demo.model.User;
 import com.example.demo.service.ItemService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 
 @RestController
 @RequestMapping("/items")
@@ -41,7 +41,7 @@ public class ItemController {
     @PostMapping
     public ResponseEntity<SingleItemResponse> createItem(
             @AuthenticationPrincipal User user,
-            @RequestBody CreateItemRequest req) {
+            @Valid @RequestBody CreateItemRequest req) {
         return ResponseEntity.ok(itemService.createItem(req, user));
     }
 
@@ -50,7 +50,7 @@ public class ItemController {
     public ResponseEntity<SingleItemResponse> uploadImage(
             @AuthenticationPrincipal User user,
             @PathVariable String id,
-            @RequestPart("image") MultipartFile image) throws IOException {
+            @RequestPart("image") MultipartFile image) {
         return ResponseEntity.ok(itemService.uploadImage(id, image, user));
     }
 
@@ -59,7 +59,7 @@ public class ItemController {
     public ResponseEntity<MessageResponse> claimItem(
             @AuthenticationPrincipal User user,
             @PathVariable String id,
-            @RequestBody ClaimItemRequest req) {
+            @Valid @RequestBody(required = false) ClaimItemRequest req) {
         return ResponseEntity.ok(itemService.claimItem(id, req, user));
     }
 

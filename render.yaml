@@ -1,0 +1,24 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: Render dashboard → New → Blueprint → pick this repo.
+# Secrets marked `sync: false` are prompted for on first deploy.
+services:
+  - type: web
+    name: campus-lost-and-found-api
+    runtime: docker
+    plan: free
+    rootDir: Backend/demo
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/actuator/health
+    autoDeploy: true
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false

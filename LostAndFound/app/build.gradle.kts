@@ -4,8 +4,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// In app/build.gradle.kts
-
 android {
     namespace = "com.example.lostandfoundfrontend"
     compileSdk = 35
@@ -16,6 +14,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
+
+        val apiBaseUrl = providers.gradleProperty("API_BASE_URL")
+            .orElse("http://10.0.2.2:8000/api/")
+            .get()
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -32,9 +35,12 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
+        // java.time is used for dates; desugaring makes it work below API 26 (minSdk is 24)
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -44,6 +50,7 @@ android {
     }
 }
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     // Core Android & Lifecycle
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.compose.material:material-icons-extended")

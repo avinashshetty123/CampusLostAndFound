@@ -2,7 +2,6 @@ package com.example.demo.controller;
 
 import com.example.demo.dto.Dto.*;
 import com.example.demo.model.User;
-import com.example.demo.repository.ItemRepository;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.AuthService;
 import com.example.demo.service.CloudinaryService;
@@ -13,7 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/user")
@@ -21,7 +20,6 @@ import java.io.IOException;
 public class UserController {
 
     private final UserRepository userRepository;
-    private final ItemRepository itemRepository;
     private final AuthService authService;
     private final ItemService itemService;
     private final CloudinaryService cloudinaryService;
@@ -29,45 +27,46 @@ public class UserController {
     /** GET /api/user/profile */
     @GetMapping("/profile")
     public ResponseEntity<ApiResponse<UserDto>> getProfile(@AuthenticationPrincipal User user) {
-        UserDto dto = buildFullDto(user);
-        return ResponseEntity.ok(new ApiResponse<>(dto, "Profile fetched", true));
+        return ResponseEntity.ok(new ApiResponse<>(authService.toDto(user), "Profile fetched", true));
     }
 
-    /** PUT /api/user/profile — update name, mobile, class, department */
+    /** PUT /api/user/profile — update name, mobile, class, department (null fields are left unchanged) */
     @PutMapping("/profile")
     public ResponseEntity<ApiResponse<UserDto>> updateProfile(
             @AuthenticationPrincipal User user,
             @RequestBody UpdateProfileRequest req) {
-        user.setName(req.getName());
-        user.setMobile(req.getMobile());
-        user.setStudentClass(req.getStudentClass());
-        user.setDepartment(req.getDepartment());
+        if (req.getName() != null) {
+            if (req.getName().isBlank()) throw ApiException.badRequest("Name cannot be empty");
+            user.setName(req.getName().trim());
+        }
+        if (req.getMobile() != null) user.setMobile(blankToNull(req.getMobile()));
+        if (req.getStudentClass() != null) user.setStudentClass(blankToNull(req.getStudentClass()));
+        if (req.getDepartment() != null) user.setDepartment(blankToNull(req.getDepartment()));
         userRepository.save(user);
-        return ResponseEntity.ok(new ApiResponse<>(buildFullDto(user), "Profile updated", true));
+        return ResponseEntity.ok(new ApiResponse<>(authService.toDto(user), "Profile updated", true));
     }
 
     /** POST /api/user/avatar — upload profile picture to Cloudinary */
     @PostMapping("/avatar")
     public ResponseEntity<ApiResponse<UserDto>> uploadAvatar(
             @AuthenticationPrincipal User user,
-            @RequestPart("avatar") MultipartFile file) throws IOException {
-        String url = cloudinaryService.uploadImage(file);
-        user.setAvatarUrl(url);
+            @RequestPart("avatar") MultipartFile file) {
+        user.setAvatarUrl(cloudinaryService.uploadImage(file));
         userRepository.save(user);
-        return ResponseEntity.ok(new ApiResponse<>(buildFullDto(user), "Avatar updated", true));
+        return ResponseEntity.ok(new ApiResponse<>(authService.toDto(user), "Avatar updated", true));
     }
 
     /** PUT /api/user/notifications — toggle notification preference */
     @PutMapping("/notifications")
     public ResponseEntity<ApiResponse<UserDto>> updateNotifications(
             @AuthenticationPrincipal User user,
-            @RequestBody java.util.Map<String, Boolean> body) {
+            @RequestBody Map<String, Boolean> body) {
         Boolean enabled = body.get("notifications_enabled");
         if (enabled != null) {
             user.setNotificationsEnabled(enabled);
             userRepository.save(user);
         }
-        return ResponseEntity.ok(new ApiResponse<>(buildFullDto(user), "Notifications updated", true));
+        return ResponseEntity.ok(new ApiResponse<>(authService.toDto(user), "Notifications updated", true));
     }
 
     /** GET /api/user/my-items — items reported by the logged-in user */
@@ -98,14 +97,7 @@ public class UserController {
         return ResponseEntity.ok(itemService.unsaveItem(itemId, user));
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
-
-    private UserDto buildFullDto(User user) {
-        UserDto dto = authService.toDto(user);
-        // Compute pending = total reports - resolved
-        long pending = itemRepository.findByReportedByOrderByCreatedAtDesc(user.getId())
-                .stream().filter(i -> !i.isResolved()).count();
-        dto.setPendingCount((int) pending);
-        return dto;
+    private static String blankToNull(String s) {
+        return s.isBlank() ? null : s.trim();
     }
 }
