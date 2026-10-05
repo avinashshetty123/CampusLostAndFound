@@ -110,7 +110,8 @@ class LostFoundViewModel : ViewModel() {
     private fun toast(message: String) { _toasts.trySend(message) }
 
     private suspend fun <T> withWakeHint(block: suspend () -> T): T = coroutineScope {
-        val hint = launch { delay(4_000); _serverWaking.value = true }
+        // Normal requests finish well under this; only a real cold start (30-60s) trips it
+        val hint = launch { delay(10_000); _serverWaking.value = true }
         try { block() } finally { hint.cancel(); _serverWaking.value = false }
     }
 

@@ -20,6 +20,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 import static com.example.demo.service.AuthService.trimToNull;
@@ -34,6 +36,7 @@ public class ItemService {
     private final UserRepository userRepository;
     private final CloudinaryService cloudinaryService;
     private final MongoTemplate mongoTemplate;
+    private final ExecutorService dbExecutor;
 
     public ItemsResponse getItems(String status, String search, int page, int perPage, User currentUser) {
         int safePage = Math.max(page, 1);
@@ -56,12 +59,14 @@ public class ItemService {
         Query query = new Query();
         if (!filters.isEmpty()) query.addCriteria(new Criteria().andOperator(filters.toArray(new Criteria[0])));
 
-        long total = mongoTemplate.count(query, Item.class);
+        // Count and page fetch run concurrently: one network round trip instead of two
+        Query countQuery = Query.of(query);
+        CompletableFuture<Long> total = CompletableFuture.supplyAsync(() -> mongoTemplate.count(countQuery, Item.class), dbExecutor);
         query.with(PageRequest.of(safePage - 1, safePerPage, Sort.by(Sort.Direction.DESC, "createdAt")));
         List<ItemDto> items = mongoTemplate.find(query, Item.class).stream()
                 .map(i -> toDto(i, currentUser))
                 .toList();
-        return new ItemsResponse(items, total, safePage, safePerPage);
+        return new ItemsResponse(items, total.join(), safePage, safePerPage);
     }
 
     public SingleItemResponse getById(String id, User currentUser) {
@@ -161,11 +166,12 @@ public class ItemService {
     }
 
     public StatsResponse getStats() {
-        long total = itemRepository.count();
-        long lost = itemRepository.countByStatus("LOST");
-        long found = itemRepository.countByStatus("FOUND");
-        long resolved = itemRepository.countByResolved(true);
-        return new StatsResponse(total, lost, found, resolved);
+        // All four counts in parallel
+        CompletableFuture<Long> total = CompletableFuture.supplyAsync(itemRepository::count, dbExecutor);
+        CompletableFuture<Long> lost = CompletableFuture.supplyAsync(() -> itemRepository.countByStatus("LOST"), dbExecutor);
+        CompletableFuture<Long> found = CompletableFuture.supplyAsync(() -> itemRepository.countByStatus("FOUND"), dbExecutor);
+        CompletableFuture<Long> resolved = CompletableFuture.supplyAsync(() -> itemRepository.countByResolved(true), dbExecutor);
+        return new StatsResponse(total.join(), lost.join(), found.join(), resolved.join());
     }
 
     // ── Mapper ────────────────────────────────────────────────────────────────

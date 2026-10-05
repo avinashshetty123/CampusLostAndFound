@@ -12,6 +12,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +23,7 @@ public class AuthService {
     private final ItemRepository itemRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final ExecutorService dbExecutor;
 
     public AuthResponse register(RegisterRequest req) {
         String email = normalizeEmail(req.getEmail());
@@ -72,8 +75,9 @@ public class AuthService {
         dto.setAvatarUrl(user.getAvatarUrl());
         dto.setNotificationsEnabled(user.isNotificationsEnabled());
 
-        long reports = itemRepository.countByReportedBy(user.getId());
+        CompletableFuture<Long> reportsF = CompletableFuture.supplyAsync(() -> itemRepository.countByReportedBy(user.getId()), dbExecutor);
         long resolved = itemRepository.countByReportedByAndResolved(user.getId(), true);
+        long reports = reportsF.join();
         dto.setReportsCount((int) reports);
         dto.setResolvedCount((int) resolved);
         dto.setPendingCount((int) (reports - resolved));
